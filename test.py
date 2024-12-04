@@ -50,10 +50,13 @@ def main():
 
     data_iter = tqdm(data_loader, desc='Processing dataset', unit='example') if local_rank == 0 else data_loader
 
-    for example_idx, example in enumerate(data_iter):
+    for batch_idx, example in enumerate(data_iter):
         sentences = example['sentences']
+        question = example['question']
+
         flat_sentences = [" ".join(inner) if isinstance(inner, list) else inner for inner in sentences]
-        text = " ".join(flat_sentences) + " " + example['question'][example_idx]  # Add corresponding question
+        flat_question = " ".join(question) if isinstance(question, list) else question
+        text = " ".join(flat_sentences) + " " + flat_question  # Add corresponding question
 
         start_idx = 0
         chunk_size = 1024
@@ -63,12 +66,15 @@ def main():
                 text[start_idx:],
                 return_tensors='pt',
                 truncation=True,
-                max_length=chunk_size
+                max_length=chunk_size,
+                return_offsets_mapping=True
             )
             input_ids = tokens['input_ids'].to(device)
 
             offset_mapping = tokens['offset_mapping'].squeeze(0)
-            last_token_end = offset_mapping[-2, 1].item()  # 마지막 유효 토큰의 끝 위치
+            slice = -2 if offset_mapping.size(0) > 1 else -1
+            last_token_end = offset_mapping[slice, 1].item()  # 마지막 유효 토큰의 끝 위치
+            pre_idx = start_idx
             start_idx += last_token_end  # 슬라이싱 위치 갱신
 
             if input_ids.size(1) < 2:

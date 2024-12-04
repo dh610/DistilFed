@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from transformers import GPT2LMHeadModel, GPT2Tokenizer
+from transformers import GPT2LMHeadModel, GPT2TokenizerFast
 
 class SimplifiedGPT2(nn.Module):
     def __init__(self, gpt2_model):
@@ -19,7 +19,7 @@ class SimplifiedGPT2(nn.Module):
         return self.linear(hidden_states)
 
 def call_gpt2_model(device):
-    tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+    tokenizer = GPT2TokenizerFast.from_pretrained('gpt2')
     gpt2 = GPT2LMHeadModel.from_pretrained('gpt2').to(device)
     minigpt2 = SimplifiedGPT2(gpt2).to(device)
     return tokenizer, gpt2, minigpt2
