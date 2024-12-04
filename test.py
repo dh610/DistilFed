@@ -34,7 +34,7 @@ def calculate_accuracy(model, input_ids, is_huggingface=False):
             if target_token in top5_indices[0].tolist():
                 correct_top5 += 1
 
-    return correct_top1 / total_tokens, correct_top5 / total_tokens
+    return correct_top1, correct_top5, total_tokens
 
 def main():
     tokenizer, llm, fedlm = call_gpt2_model(device)
@@ -45,8 +45,8 @@ def main():
     llm.eval()
     fedlm.eval()
 
-    fed_result = {"top1_acc": 0, "top5_acc": 0, "file_count": 0}
-    llm_result = {"top1_acc": 0, "top5_acc": 0, "file_count": 0}
+    fed_result = {"top1_acc": 0, "top5_acc": 0, "total_count": 0}
+    llm_result = {"top1_acc": 0, "top5_acc": 0, "total_count": 0}
 
     data_iter = tqdm(data_loader, desc='Processing dataset', unit='example') if local_rank == 0 else data_loader
 
@@ -60,6 +60,7 @@ def main():
 
         start_idx = 0
         chunk_size = 1024
+        batch_file_cnt = 0
 
         while start_idx < len(text):
             tokens = tokenizer(
@@ -80,17 +81,19 @@ def main():
             if input_ids.size(1) < 2:
                 continue  # 너무 짧은 입력은 스킵
 
-            fed_top1_acc, fed_top5_acc = calculate_accuracy(fedlm, input_ids)
+            fed_top1_acc, fed_top5_acc, fed_total_count = calculate_accuracy(fedlm, input_ids)
             fed_result["top1_acc"] += fed_top1_acc
             fed_result["top5_acc"] += fed_top5_acc
+            fed_result['total_count'] += fed_total_count
 
-            llm_top1_acc, llm_top5_acc = calculate_accuracy(llm, input_ids, is_huggingface=True)
+            llm_top1_acc, llm_top5_acc, llm_total_count = calculate_accuracy(llm, input_ids, is_huggingface=True)
             llm_result["top1_acc"] += llm_top1_acc
             llm_result["top5_acc"] += llm_top5_acc
+            llm_result['total_count'] += llm_total_count
 
     # Convert results to tensors for distributed reduction
-    fed_tensor = torch.tensor([fed_result["top1_acc"], fed_result["top5_acc"], fed_result["file_count"]], device=device)
-    llm_tensor = torch.tensor([llm_result["top1_acc"], llm_result["top5_acc"], llm_result["file_count"]], device=device)
+    fed_tensor = torch.tensor([fed_result["top1_acc"], fed_result["top5_acc"], fed_result["total_count"]], device=device)
+    llm_tensor = torch.tensor([llm_result["top1_acc"], llm_result["top5_acc"], llm_result["total_count"]], device=device)
 
     # Reduce results to rank 0
     dist.reduce(fed_tensor, dst=0, op=dist.ReduceOp.SUM)
