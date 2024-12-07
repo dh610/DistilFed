@@ -20,7 +20,7 @@ def main():
     data_dir = './tokens'
     dataset = TokenizedDataset(data_dir)
     sampler = DistributedSampler(dataset, num_replicas=dist.get_world_size(), rank=local_rank, shuffle=False)
-    data_loader = DataLoader(dataset, sampler=sampler, batch_size=16, pin_memory=True, num_workers=4)
+    data_loader = DataLoader(dataset, sampler=sampler, batch_size=64, pin_memory=True, num_workers=4)
 
     llm.eval()
     fedlm.train()
@@ -29,7 +29,7 @@ def main():
 
     T = 1.0
     alpha = 0.5
-    num_epochs = 3
+    num_epochs = 5
 
     for epoch in range(num_epochs):
         data_iter = tqdm(data_loader, unit='batch', desc=f"Epoch [{epoch + 1}/{num_epochs}]", disable=(local_rank != 0))
@@ -64,7 +64,7 @@ def main():
 
         if local_rank == 0:
             torch.save(fedlm.module.state_dict(), f"ckpts/fedlm_distilled_epoch{epoch + 1}.pt")
-            print(f"Model saved to fedlm_distilled_epoch{epoch + 1}.pt")
+            print(f"Model saved to ckpts/fedlm_distilled_epoch{epoch + 1}.pt")
 
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
@@ -74,5 +74,4 @@ if __name__ == '__main__':
     if device.type != 'cuda':
         print('Cannot use CUDA')
         sys.exit(1)
-
     main()

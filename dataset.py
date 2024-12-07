@@ -23,7 +23,7 @@ class TokenizedDataset(Dataset):
 if __name__ == "__main__":
     output_path = 'tokens'
     tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
-    dataset = load_dataset("Skylion007/openwebtext", split='train')
+    dataset = load_dataset("bookcorpus/bookcorpus", split='train')
 
     tokenizer.pad_token = tokenizer.eos_token
 
