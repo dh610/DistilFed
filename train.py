@@ -14,13 +14,29 @@ device = torch.device("cuda", local_rank)
 def main():
     # Model setting
     llm, fedlm = model.call_gpt2_model(device)
-    fedlm = nn.parallel.DistributedDataParallel(fedlm, device_ids=[local_rank], output_device=local_rank)
+    fedlm.load_state_dict(torch.load('./ckpts/fedlm_distilled_epoch1.pt'))
+    fedlm = nn.parallel.DistributedDataParallel(
+        fedlm,
+        device_ids=[local_rank],
+        output_device=local_rank,
+        find_unused_parameters=True
+    )
+
+    # Freezing embedding and lmhead params
+    for param in fedlm.module.transformer.wte.parameters():
+        param.requires_grad = False
+
+    for param in fedlm.module.transformer.wpe.parameters():
+        param.requires_grad = False
+
+    for param in fedlm.module.lm_head.parameters():
+        param.requires_grad = False
 
     # Dataset setting
     data_dir = './tokens'
     dataset = TokenizedDataset(data_dir)
     sampler = DistributedSampler(dataset, num_replicas=dist.get_world_size(), rank=local_rank, shuffle=False)
-    data_loader = DataLoader(dataset, sampler=sampler, batch_size=64, pin_memory=True, num_workers=4)
+    data_loader = DataLoader(dataset, sampler=sampler, batch_size=32, pin_memory=True, num_workers=4)
 
     llm.eval()
     fedlm.train()
@@ -29,7 +45,7 @@ def main():
 
     T = 1.0
     alpha = 0.5
-    num_epochs = 5
+    num_epochs = 2
 
     for epoch in range(num_epochs):
         data_iter = tqdm(data_loader, unit='batch', desc=f"Epoch [{epoch + 1}/{num_epochs}]", disable=(local_rank != 0))
