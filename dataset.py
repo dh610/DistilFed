@@ -1,15 +1,14 @@
 import torch
-from transformers import GPT2Tokenizer
+from transformers import GPT2TokenizerFast, GPT2Tokenizer
 from torch.utils.data import Dataset
 from datasets import load_dataset
 from tqdm import tqdm
 import os
 
 class TokenizedDataset(Dataset):
-    def __init__(self, input_dir):
+    def __init__(self, file_path):
         # Dataset type: (input_ids, attention_mask)
-        for file_path in input_dir:
-            data = torch.load(file_path)
+        data = torch.load(file_path)
         self.input_ids = data[0]          # [num_samples, seq_len]
         self.attention_mask = data[1]     # [num_samples, seq_len]
 
@@ -24,21 +23,21 @@ class TokenizedDataset(Dataset):
 
 if __name__ == "__main__":
 
-    output_path = './fedtokens'
+    output_path = './tokens'
 
     print(f"Tokenized dataset will be saved at {output_path}")
 
-    tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+    tokenizer = GPT2TokenizerFast.from_pretrained('gpt2')
     tokenizer.pad_token = tokenizer.eos_token
 
-    dataset = load_dataset('bookcorpus/bookcorpus', split='train')
+    dataset = load_dataset('allenai/c4', 'realnewslike', split='train')
 
     def tokenize_function(examples):
         return tokenizer(examples['text'], truncation=True, padding='max_length', max_length=128)
 
     tokenized_dataset = dataset.map(tokenize_function, batched=True)
 
-    batch_size = 5_000_000
+    batch_size = 700000
     input_ids_list = []
     attention_mask_list = []
 
@@ -52,7 +51,7 @@ if __name__ == "__main__":
             attention_mask = torch.tensor(attention_mask_list)
             save_path = os.path.join(output_path, f'tokenized_dataset_{batch_idx}.pt')
             torch.save((input_ids, attention_mask), save_path)
-            print(f"Tokenized dataset saved in batch to {output_path}")
+            print(f"Tokenized dataset saved in batch to {save_path}")
 
             input_ids_list = []
             attention_mask_list = []
