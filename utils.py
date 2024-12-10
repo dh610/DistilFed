@@ -1,26 +1,25 @@
 import torch
+import math
 
 def calculate_perplexity(data_loader, model, device):
     total_loss = 0.0
     total_tokens = 0
 
     for batch in data_loader:
-        input_ids = batch.to(device)  # input_ids
+        input_ids = batch['input_ids'].to(device)
+        attention_mask = batch['attention_mask'].to(device)
 
-        for i in range(1, input_ids.size(1)):
-            input_context = input_ids[:, :i]
-            target_token = input_ids[:, i]
+        outputs = model(input_ids, attention_mask=attention_mask, labels=input_ids)
+        loss = outputs.loss
 
-            with torch.no_grad():
-                outputs = model(input_context, target_token)
-                loss = outputs.loss
+        batch_size, seq_len = input_ids.size()
+        total_loss += loss.item() * batch_size * seq_len
+        total_tokens += batch_size * seq_len
 
-            total_loss += loss.sum().item()
-            total_tokens += loss.numel()
+    average_loss = total_loss / total_tokens if total_tokens > 0 else float('inf')
+    perplexity = math.exp(average_loss) if average_loss < float('inf') else float('inf')
 
-    avg_loss = total_loss / total_tokens
-    perplexity = torch.exp(torch.tensor(avg_loss))
-    return perplexity.item()
+    return perplexity
 
 def save_checkpoint(checkpoint_path, model):
     torch.save(model.state_dict(), checkpoint_path)

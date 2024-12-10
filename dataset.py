@@ -55,7 +55,7 @@ if __name__ == "__main__":
     tokenizer = GPT2TokenizerFast.from_pretrained('gpt2')
     tokenizer.pad_token = tokenizer.eos_token
 
-    dataset = load_dataset('allenai/c4', 'realnewslike', split='train')
+    dataset = load_dataset('allenai/c4', 'realnewslike', split='validation')
 
     def tokenize_function(examples):
         return tokenizer(examples['text'], truncation=True, padding='max_length', max_length=128)
@@ -74,7 +74,7 @@ if __name__ == "__main__":
             batch_idx = i // batch_size
             input_ids = torch.tensor(input_ids_list)
             attention_mask = torch.tensor(attention_mask_list)
-            save_path = os.path.join(output_path, f'tokenized_dataset_{batch_idx}.pt')
+            save_path = os.path.join(output_path, f'validation_dataset.pt')
             torch.save((input_ids, attention_mask), save_path)
             print(f"Tokenized dataset saved in batch to {save_path}")
 

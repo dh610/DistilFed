@@ -1,5 +1,6 @@
 import os, torch, model
 from tqdm import tqdm
+from collections import OrderedDict
 
 from dataset import make_dataset_list_by_iter
 import torch.nn.functional as F
@@ -15,7 +16,7 @@ def main(device):
     # Model setting
     gpt2 = model.get_gpt2_wo_embedder()
     fedlm, embedder = model.get_minigpt_and_embedder()
-    fedlm.transformer.h.load_state_dict(torch.load('./ckpts/params_before_fed.pt'))
+    fedlm.transformer.h.load_state_dict(torch.load('./ckpts/before_fed.pt'))
 
     gpt2.to(device)
     fedlm.to(device)
@@ -33,9 +34,9 @@ def main(device):
     optimizer = torch.optim.AdamW(fedlm.parameters(), lr=1e-4)
 
     file_num = 15
-    client_num = 64
+    client_num = 128
     end_data = 524288
-    batch_size = 32
+    batch_size = 64
     round_num = 128
 
     round = 0
@@ -81,15 +82,14 @@ def main(device):
                 kd_loss=kd_loss.item(),
                 total_loss=total_loss.item()
             )
-            if (batch_idx + 1) % 64 == 0:
+            if (batch_idx + 1) % 16 == 0:
                 parameters[client] = fedlm.transformer.h.state_dict()
                 torch.save(parameters[client], f'./ckpts/params_round_{round}_{client}.pt')
                 client += 1
                 if client == client_num:
                     client = 0
                     #fedavg calculate
-                    stacked_tensors = torch.stack(parameters, dim=0)
-                    fedparam = torch.mean(stacked_tensors, dim=0)
+                    fedparam = average_state_dicts(parameters)
                     torch.save(fedparam, f'./ckpts/params_round_{round}.pt')
                     parameters = [fedparam] * client_num
 
@@ -104,6 +104,13 @@ def main(device):
 
         if round == round_num:
             break
+
+
+def average_state_dicts(state_dicts):
+    avg_state_dict = OrderedDict()
+    for key in state_dicts[0].keys():
+        avg_state_dict[key] = torch.stack([sd[key] for sd in state_dicts], dim=0).mean(dim=0)
+    return avg_state_dict
 
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
