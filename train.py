@@ -1,67 +1,67 @@
-import sys, os, torch, model
+import os, torch, model
 from tqdm import tqdm
-import torch.distributed as dist
-from torch.utils.data import DataLoader, DistributedSampler
-from dataset import TokenizedDataset
-import torch.nn.functional as F
-import torch.nn as nn
 
+from dataset import make_dataset_list_by_iter
+import torch.nn.functional as F
+
+'''
 dist.init_process_group(backend="nccl")
 local_rank = dist.get_rank()
 torch.cuda.set_device(local_rank)
 device = torch.device("cuda", local_rank)
+'''
 
-def main():
+def main(device):
     # Model setting
-    llm, fedlm = model.call_gpt2_model(device)
-    fedlm.load_state_dict(torch.load('./ckpts/fedlm_distilled_epoch1.pt'))
-    fedlm = nn.parallel.DistributedDataParallel(
-        fedlm,
-        device_ids=[local_rank],
-        output_device=local_rank,
-        find_unused_parameters=True
-    )
+    gpt2 = model.get_gpt2_wo_embedder()
+    fedlm, embedder = model.get_minigpt_and_embedder()
+    fedlm.transformer.h.load_state_dict(torch.load('./ckpts/params_before_fed.pt'))
 
-    # Freezing embedding and lmhead params
-    for param in fedlm.module.transformer.wte.parameters():
-        param.requires_grad = False
+    gpt2.to(device)
+    fedlm.to(device)
+    embedder.to(device)
 
-    for param in fedlm.module.transformer.wpe.parameters():
-        param.requires_grad = False
+    gpt2.eval()
+    fedlm.train()
+    embedder.eval()
 
-    for param in fedlm.module.lm_head.parameters():
+    for param in fedlm.lm_head.parameters():
         param.requires_grad = False
 
     # Dataset setting
-    data_dir = './tokens'
-    dataset = TokenizedDataset(data_dir)
-    sampler = DistributedSampler(dataset, num_replicas=dist.get_world_size(), rank=local_rank, shuffle=False)
-    data_loader = DataLoader(dataset, sampler=sampler, batch_size=32, pin_memory=True, num_workers=4)
-
-    llm.eval()
-    fedlm.train()
 
     optimizer = torch.optim.AdamW(fedlm.parameters(), lr=1e-4)
 
+    file_num = 15
+    client_num = 64
+    end_data = 524288
+    batch_size = 32
+    round_num = 128
+
+    round = 0
+    client = 0
+
     T = 1.0
     alpha = 0.5
-    num_epochs = 2
 
-    for epoch in range(num_epochs):
-        data_iter = tqdm(data_loader, unit='batch', desc=f"Epoch [{epoch + 1}/{num_epochs}]", disable=(local_rank != 0))
+    for i in range(file_num):
+        dataloader = make_dataset_list_by_iter(i)
+        length = end_data // batch_size
+        bar = tqdm(enumerate(dataloader), total=length)
 
-        for batch_idx, batch in enumerate(data_iter):
+        parameters = [None] * client_num
+
+        for batch_idx, batch in bar:
             input_ids = batch['input_ids'].to(device)
             attention_mask = batch['attention_mask'].to(device)
 
-            # Teacher model inference (no_grad)
             with torch.no_grad():
-                teacher_outputs = llm(input_ids, attention_mask=attention_mask)
-                teacher_logits = teacher_outputs.logits
+                embeds = embedder(input_ids).last_hidden_state
+                # 원래는 이 과정이 서버를 거치고 돌아와야 하는 과정임.
+                teacher_logits = model.embed_to_transformer(gpt2, embeds, attention_mask=attention_mask).logits
 
-            # Student model inference
-            student_outputs = fedlm(input_ids, attention_mask=attention_mask, labels=input_ids)
-            student_loss = student_outputs.loss  # CE Loss
+            student_outputs = model.embed_to_transformer(fedlm, embeds, attention_mask=attention_mask, labels=input_ids)
+            student_loss = student_outputs.loss
             student_logits = student_outputs.logits
 
             # KD Loss
@@ -75,19 +75,40 @@ def main():
             total_loss.backward()
             optimizer.step()
 
-            if local_rank == 0:
-                data_iter.set_postfix(ce_loss=student_loss.item(), kd_loss=kd_loss.item(), total_loss=total_loss.item())
+            bar.set_postfix(
+                state=f'{round}-{client}',
+                ce_loss=student_loss.item(),
+                kd_loss=kd_loss.item(),
+                total_loss=total_loss.item()
+            )
+            if (batch_idx + 1) % 64 == 0:
+                parameters[client] = fedlm.transformer.h.state_dict()
+                torch.save(parameters[client], f'./ckpts/params_round_{round}_{client}.pt')
+                client += 1
+                if client == client_num:
+                    client = 0
+                    #fedavg calculate
+                    stacked_tensors = torch.stack(parameters, dim=0)
+                    fedparam = torch.mean(stacked_tensors, dim=0)
+                    torch.save(fedparam, f'./ckpts/params_round_{round}.pt')
+                    parameters = [fedparam] * client_num
 
-        if local_rank == 0:
-            torch.save(fedlm.module.state_dict(), f"ckpts/fedlm_distilled_epoch{epoch + 1}.pt")
-            print(f"Model saved to ckpts/fedlm_distilled_epoch{epoch + 1}.pt")
+                    round += 1
+
+                next_param = parameters[client]
+                if next_param is not None:
+                    fedlm.transformer.h.load_state_dict(parameters[client])
+
+            if batch_idx * batch_size >= end_data:
+                break
+
+        if round == round_num:
+            break
 
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 if __name__ == '__main__':
-    if device.type != 'cuda':
-        print('Cannot use CUDA')
-        sys.exit(1)
-    main()
+    device = torch.device("cuda:0")
+    main(device)

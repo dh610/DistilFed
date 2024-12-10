@@ -24,7 +24,7 @@ def recv_all(sock, n):
     return data
 
 
-def recv_tensor(sock):
+def recv_tensor(sock, data_length):
     """
     Recieve tensor that send by socket
 
@@ -34,13 +34,6 @@ def recv_tensor(sock):
     Returns:
         torch.Tensor: Received tensor.
     """
-    # Receive header
-    header = recv_all(sock, 8)
-    if not header:
-        return None
-    header, data_length = struct.unpack('!II', header)[0]
-
-    # recieve data
     data = recv_all(sock, data_length)
     if not data:
         return None
@@ -49,6 +42,15 @@ def recv_tensor(sock):
     buffer = io.BytesIO(data)
     tensor = torch.load(buffer)
     return tensor
+
+def recv_header(sock):
+    # Receive header
+    header = recv_all(sock, 8)
+    if not header:
+        return None
+    header1, header2= struct.unpack('!II', header)
+
+    return header1, header2
 
 
 def send_tensor(sock, head, tensor):
@@ -59,15 +61,19 @@ def send_tensor(sock, head, tensor):
         sock (socket.socket): Socket instance.
         tensor (torch.Tensor): Tensor to send.
     """
+    if tensor.is_cuda:
+        tensor = tensor.cpu()
+
     # Serialize tensor(to binary data)
     buffer = io.BytesIO()
     torch.save(tensor, buffer)
     data = buffer.getvalue()
 
-    # Send header
-    data_length = len(data)
-    header = (head, data_length)
-    sock.sendall(struct.pack('!II', *header))
+    if head < 200:
+        # Send header
+        data_length = len(data)
+        header = (head, data_length)
+        sock.sendall(struct.pack('!II', *header))
 
     # Send data
     sock.sendall(data)

@@ -1,6 +1,6 @@
 import torch
 from transformers import GPT2TokenizerFast, GPT2Tokenizer
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader, DistributedSampler
 from datasets import load_dataset
 from tqdm import tqdm
 import os
@@ -20,6 +20,31 @@ class TokenizedDataset(Dataset):
             'input_ids': self.input_ids[idx],
             'attention_mask': self.attention_mask[idx]
         }
+
+def make_dataset_list_by_iter(file_num, batch_size=16, world_size=None, rank=None):
+    file_path = f"./tokens/tokenized_dataset_{file_num}.pt"
+    dataset = TokenizedDataset(file_path)
+
+    # DistributedSampler로 데이터셋을 GPU별로 나누기
+    if world_size is not None:
+        sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank)
+
+        # DataLoader 생성
+        dataloader = DataLoader(
+            dataset,
+            batch_size=batch_size,
+            sampler=sampler,  # DistributedSampler 적용
+            pin_memory=True,
+            num_workers=4
+        )
+    else:
+        dataloader = DataLoader(
+            dataset,
+            batch_size=batch_size,
+            pin_memory=True,
+            num_workers=4
+        )
+    return dataloader
 
 if __name__ == "__main__":
 

@@ -43,10 +43,11 @@ if __name__ == '__main__':
     gpt2, minigpt2 = call_gpt2_model(device)
     minigpt2.load_state_dict(params)
 
+    '''
     minigpt2.transformer.wte = nn.Identity()
     minigpt2.transformer.wpe = nn.Identity()
     minigpt2.transformer.drop = nn.Identity()
+    '''
 
-    params = minigpt2.state_dict()
-    print(params)
+    params = minigpt2.transformer.h.state_dict()
     torch.save(params, './ckpts/params_before_fed.pt')
